@@ -8,6 +8,43 @@ Future work tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
+## [0.1.1] — 2026-05-31 (review branch)
+
+Codebase review pass on the `review/v0.1.x` branch. No behavioural change to the public commands or JSON shapes — just hygiene and small correctness fixes. See [docs/REVIEW.md](docs/REVIEW.md) for the full ranked plan; the items below are what landed on this branch.
+
+### Added
+
+- **`lib/util.js`** — `humanAge`, `fail`, `spacesToScan` extracted from duplicated implementations in `commands.js` and `install.mjs`.
+
+### Changed
+
+- **`commands.js`** — replaced ~9 sites of `if (json) out({ok:false,…}) else console.error(…); process.exit(1)` boilerplate with `fail(msg, extra, json)`.
+- **`commands.js`** — replaced 4 sites of the `default_spaces fallback` ternary with `spacesToScan(config, override)`.
+- **`commands.js`** — module constants (`DEFAULT_CACHE_TTL_SECONDS`, `MEMBERS_CACHE_TTL_MS`) moved to top of file.
+- **`config.js`** — `loadConfig` now merges file contents over `DEFAULT_CONFIG` so older configs missing newer keys (e.g. `cache_ttl_seconds`) silently inherit defaults instead of forcing each caller to `?? defaultValue`.
+- **`chat-api.js`** — `api()` errors now carry `.status` and `.body` so callers can branch on HTTP code instead of regexing the message string.
+- **`chat-api.js`** — `findDirectMessage` uses `e.status === 404` instead of `/404/.test(e.message)` for the "no DM yet" case.
+- **`chat-api.js`** — `getMe` now throws on non-200 (with `.status`/`.body`) instead of silently returning `null`. `generateMe` catches and continues, surfacing the cause as a stderr note ("identity lookup skipped: …").
+
+### Fixed
+
+- **`chat-api.js`** — `listThreadMessages` validates `threadName` shape (`spaces/<X>/threads/<Y>`) before interpolating into the API filter. Surfaces a clear error if a cache row is corrupted or a future caller constructs an invalid name.
+- **`chat-api.js`** — mention regex uses `\p{L}` with the `u` flag, so names with diacritics (`Mañuel`, `Müller`, `Renée`) resolve correctly. ASCII-only `[A-Za-z]+` was a real gap for any non-Linways org.
+- **`config.js`** — `createBackup` sanitizes the label (alphanumeric/`-`/`_` only, capped at 40 chars). A risky label like `../escape` becomes `--escape`, preventing path traversal out of `~/.lwchat/backups/`.
+- **`config.js`** — backed-up `tokens.json` is written with mode `0o600` (matching the live file). Previously took the default umask, which weakened protection of the refresh token in backup copies.
+- **`me.js`** — `aliasFromName` no longer crashes when `displayName` is falsy (auto-managed Chat spaces sometimes lack one). Falls through to base "space".
+- **`redmine.js`** — `extractIssueId` caches the compiled regex per pattern. Avoids re-compiling the same pattern on every message during scans (2000+ calls per `find`).
+
+### Documentation
+
+- New `docs/REVIEW.md` — the review report itself: every finding, weighted by value × safety, with a numbered implementation plan and an explicit "what NOT to do" list.
+
+### Verified
+
+`lwchat doctor` 8 ok · 0 warn · 0 fail · 0 skip on the review branch. Smoke tests pass for `find`, `read`, `reply`, `post` (to myspace), `dm` (self error-path), `search`, `backup` (including the sanitize test), and the `threadName` shape guard.
+
+---
+
 ## [0.1.0] — 2026-05-31
 
 First feature-complete release. Verified end-to-end against a live Google Workspace org with `lwchat doctor` reporting 8/8 ok.
