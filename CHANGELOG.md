@@ -44,9 +44,30 @@ Triggered by a real bug report: trying to `dm "Akshay K P"` failed because Aksha
 
 A new standing rule, surfaced during this session and saved to project memory: **if a missing OAuth scope solves the underlying problem, just request it and re-auth; don't reach for workarounds**. The "what scopes do we have, what could we add" matrix in REVIEW.md (and this CHANGELOG entry) is the template.
 
+### Added (post-Directory: caching + warm pipeline)
+
+- **Pre-warm at login** — `afterLogin` runs `warmMemberCaches`, parallel `buildSpaceMemberMap` across every configured space, single race-safe write. Surfaces progress: `Warming members for 7 space(s)… done · 196 member(s) in 1.3s`.
+- **`lwchat warm`** — public-facing entry to the same routine. Re-warm without re-auth, useful after `cache clear` or when a colleague joins.
+- **`cachedDirectorySearch(query)`** — wraps `searchDirectory` with a 7-day cache stored in `members.json` under `directory_cache`. Powers both `lwchat directory` and the layer-3 lookup in `resolveUserRef`. `lwchat directory <q> --refresh` bypasses the cache.
+- **`lwchat cache show`** now reports all three caches (thread / members / directory) with per-entry freshness; **`lwchat cache clear`** clears all three.
+
+### Fixed (post-Directory)
+
+- **Race condition in member cache writes.** Concurrent `getMemberMap` calls each read-modified-saved `members.json` independently, so only the last writer's space survived (`cache show` after the first `warm` showed just 1 space instead of 7). `warmMemberCaches` now reads once, runs API work in parallel, writes once.
+
+### Changed (post-Directory)
+
+- **TTL bumped to 7 days** for both `members.json` rosters and `directory_cache`. Member lists "rarely change" (user feedback); honest TTL stops forced redundant work.
+- **Annotation name scrape removed entirely.** `buildMemberMap` deleted from `chat-api.js`. `buildSpaceMemberMap` now consults only `listAllMembers` + `peopleBatchGet`. **Warm time dropped 17.4s → 1.3s** (13×). For the public-core trim, see ADR-014 — annotations can be re-introduced behind a config flag if shipped to orgs that lock directory access.
+
+### Architecture decisions (post-Directory)
+
+- **New ADR-014** — pre-warm at login + race fix + annotation removal + 7-day TTLs.
+- **ADR-011 fully superseded by ADR-014** (was partially-superseded by ADR-012; this commit completes the move off annotations).
+
 ### Verified
 
-`lwchat doctor` 8 ok · 0 warn · 0 fail · 0 skip. `lwchat directory akshay` returns two matches with names + emails + IDs. `lwchat members refresh --space exam-controller` populated 22 members with their real Workspace names (was annotation-only / incomplete before).
+`lwchat doctor` 8 ok · 0 warn · 0 fail · 0 skip. `lwchat directory akshay` returns two matches with names + emails + IDs (first call ~0.6s live, subsequent calls ~0.05s cached). `lwchat warm` covers all 7 spaces / 196 members in 1.3s — was 17.4s before the annotation removal. `lwchat cache show` reports all three cache sections.
 
 ---
 

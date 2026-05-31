@@ -15,6 +15,7 @@ import {
   cmdPost,
   cmdDm,
   cmdDirectory,
+  cmdWarm,
   cmdSearch,
   cmdThreads,
   cmdIndex,
@@ -50,8 +51,9 @@ COMMANDS:
     reply   <issue_id> <message> [--space <a>]  Reply; --space required when issue spans spaces
 
     post    <space> <message> [--thread <name>]  Post to a space; --thread replies to a specific thread
-    dm      <user> <message>            DM a user (email/name/users/id) — existing DM space required
-    directory <query>                   Search the org directory (name → user id + email)
+    dm      <user> <message>            DM a user (email/name/users/id); auto-creates DM if needed
+    directory <query> [--refresh]       Search the org directory (cached 24h)
+    warm                                Pre-fetch all configured spaces' members + names (cache hot)
     search  <term> [--space <a> | --spaces a,b,c] [--limit N] [--case-sensitive]
                                         Search messages across configured spaces (client-side scan)
 
@@ -222,13 +224,19 @@ async function main() {
         break;
       }
 
+      case "warm":
+        await cmdWarm(json);
+        break;
+
       case "directory": {
-        const query = cleanArgs.slice(1).join(" ");
+        const refresh = cleanArgs.includes("--refresh");
+        const queryParts = cleanArgs.slice(1).filter((a) => a !== "--refresh");
+        const query = queryParts.join(" ");
         if (!query) {
-          console.error("Usage: lwchat directory <name or email>");
+          console.error("Usage: lwchat directory <name or email> [--refresh]");
           process.exit(1);
         }
-        await cmdDirectory(query, json);
+        await cmdDirectory(query, refresh, json);
         break;
       }
 

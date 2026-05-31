@@ -169,11 +169,23 @@ If the recipient has no existing DM space with the user, **lwchat creates one** 
 ### Org directory lookup
 
 ```bash
-lwchat directory <query>          # human output
-lwchat directory <query> --json   # { ok, query, count, results: [{name, email, userId}] }
+lwchat directory <query>             # human output (uses 7-day cache after first lookup)
+lwchat directory <query> --refresh   # bypass cache, hit People API live
+lwchat directory <query> --json      # { ok, query, count, from_cache, results: [{name, email, userId}] }
 ```
 
-Search the user's Workspace directory for matching people. Returns `name`, `email`, and `users/<id>` — useful when you want a `users/<id>` to pass to other commands, or when you're not sure of the exact spelling. Independent of which spaces you're in.
+Search the user's Workspace directory for matching people. Returns `name`, `email`, and `users/<id>`. Independent of which spaces you're in. Results are cached 7 days so a repeat lookup is instant.
+
+### Cache warming
+
+`auth login` auto-pre-warms every configured space's member roster (parallel, ~1-2s) so the **first** command after login runs cache-hot. To re-warm anytime (after adding a space, after a colleague joins, after `cache clear`):
+
+```bash
+lwchat warm           # human output: "done · X member(s) across Y space(s) in Zs"
+lwchat warm --json    # { ok, spaces, warmed, failed, total_members, duration_ms }
+```
+
+Both `members.json` and the `directory_cache` carry a 7-day TTL — member lists rarely change at most teams. `lwchat cache show` lists all three cache sections (thread / members / directory) with per-entry age.
 
 ### Search messages
 

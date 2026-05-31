@@ -236,7 +236,7 @@ Requesting an additional write scope forces every user through another consent s
 ---
 
 ## ADR-011: Annotation-based member name resolution (not `spaces.members.list`)
-**Date:** 2026-05-26 · **Status:** **Partially superseded by ADR-012 (2026-05-31)** — annotation scraping is now layer 2 of the resolver (fallback after the Directory API). The original reasoning still holds for users not in the org's directory (Chat apps, external members), so the code path stays.
+**Date:** 2026-05-26 · **Status:** **Fully superseded by ADR-014 (2026-05-31)** — annotation scraping was removed entirely. ADR-012 had kept it as a fallback layer; ADR-014 deleted it once we confirmed the fallback never fires in our Workspace and was adding ~15s to every warm. Kept for historical context.
 
 ### Context
 
@@ -343,6 +343,45 @@ Implement `getOrCreateDmSpace(userId)` in `chat-api.js`:
 - **−** Consent screen is one line longer; broader authority requested
 - **−** Re-auth required after upgrade (CHANGELOG note in v0.1.2)
 - ADR-010 stays in the file as historical context, marked superseded.
+
+---
+
+## ADR-014: Remove annotation-scrape name resolution; pre-warm member rosters at login
+**Date:** 2026-05-31 · **Status:** Accepted · **Supersedes:** ADR-011 (fully)
+
+### Context
+
+ADR-012 added `directory.readonly` and made the People API Directory the primary name source. ADR-011's annotation-scrape (`buildMemberMap`) was kept as a fallback for users not in the org directory.
+
+Two observations made the fallback dead weight in practice:
+
+1. **Every member of every space at Linways is in the org directory.** The fallback never fires in real use.
+2. **The fallback is expensive** — ~10 paginated message-list calls per space (~1000 messages scanned just to read names from `USER_MENTION` annotations). When `lwchat warm` pre-fetches 7 spaces, this added ~15s of unnecessary network work even though Directory had already returned every name.
+
+A separate observation: **member rosters are stable.** New members get added "once in a while" (the user's words). Holding the cache for a day is overcautious; we can hold it for a week.
+
+### Decision
+
+1. **Delete `buildMemberMap`** from `lib/chat-api.js` entirely (and remove from the exports). `buildSpaceMemberMap` now consults only `listAllMembers` (real roster) + `peopleBatchGet` (Directory names) + bare `users/<id>` fallback.
+2. **Pre-warm every configured space's member map at login** via `warmMemberCaches`, parallel API + single race-safe write. Surface progress (`Warming members for N space(s)… done · X member(s) in Ys`).
+3. **`lwchat warm`** — public-facing entry point to the same routine; lets the user re-warm without re-auth (e.g. after `cache clear` or after a new colleague joins).
+4. **Race fix in the warm path** — concurrent `getMemberMap` calls each read members.json, modified, and saved → last-writer-wins lost data. `warmMemberCaches` now does one read, parallel API work, single write.
+5. **Bump TTLs to 7 days** for both `members.json` rosters and `directory_cache` search results. Member lists rarely change; aggressive expiration only forced redundant work.
+6. **Extend `lwchat cache show` / `cache clear`** to cover all three caches (thread / members / directory) so the user always has a single command to inspect or reset everything.
+
+### Reasoning
+
+- Removing `buildMemberMap` cuts ~30 lines, deletes a known race-prone code path, and shaves ~15s off the warm flow.
+- Pre-warm at login keeps the agentic UX promise: every command after first auth runs cache-hot.
+- 7-day TTL is honest about how stable the data actually is. Login auto-warms; `warm` is the manual refresh path.
+
+### Consequences
+
+- **+** Login takes a few seconds longer (one-time, with progress); every subsequent command is cache-hot.
+- **+** Code is meaningfully simpler — the resolver is 4 layers but layer 4 is a tiny lookup against the same Directory-sourced data, not a separate scrape.
+- **+** Race condition (silent data loss when warming concurrently) eliminated.
+- **−** lwchat without `directory.readonly` (admin-disabled Workspace or a personal Google account) no longer gets name resolution at all. **Documented limitation; revisitable** — the public-core trim can re-introduce the annotation path behind a config flag if it ships to orgs that lock down directory access. For Linways, every member is in the directory, so this case never occurs.
+- **−** TTL bump means a colleague who joins today won't be findable by `dm <name>` until the user runs `lwchat warm`. Acceptable: the message has a clear path to refresh (`lwchat warm`), and login auto-warms.
 
 ---
 
